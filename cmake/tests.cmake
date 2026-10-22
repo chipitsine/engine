@@ -134,6 +134,38 @@ if(TLS13_PATCHED_OPENSSL)
   add_integration_test(NAME test_tls13handshake ${WITH_PROVIDER} LINK_LIBS OpenSSL::Crypto OpenSSL::SSL)
 endif()
 
+# Under ASAN, enumerate everything the loaded gost provider/engine exposes
+# through `openssl list`; malformed OSSL_DISPATCH tables (e.g. missing
+# terminator entry) show up as global-buffer-overflow in these walks.
+if(ASAN AND OPENSSL_PROGRAM)
+    execute_process(COMMAND ${OPENSSL_PROGRAM} list -help
+        OUTPUT_VARIABLE _list_help ERROR_VARIABLE _list_help_err)
+    set(_list_help "${_list_help}\n${_list_help_err}")
+    set(_asan_list_options
+        digest-algorithms cipher-algorithms mac-algorithms kdf-algorithms
+        random-generators encoders decoders key-managers
+        key-exchange-algorithms kem-algorithms signature-algorithms
+        asymcipher-algorithms store-loaders public-key-algorithms
+        public-key-methods providers)
+    foreach(_opt ${_asan_list_options})
+        if(NOT _list_help MATCHES "-${_opt}[ \t\r\n]")
+            continue()
+        endif()
+        if(GOST_BUILD_PROVIDER)
+            add_test(NAME asan_list_${_opt}-with-provider
+                     COMMAND ${OPENSSL_PROGRAM} list -${_opt})
+            set_tests_properties(asan_list_${_opt}-with-provider
+                PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT_PROVIDER}")
+        endif()
+        if(GOST_BUILD_ENGINE)
+            add_test(NAME asan_list_${_opt}-with-engine
+                     COMMAND ${OPENSSL_PROGRAM} list -${_opt})
+            set_tests_properties(asan_list_${_opt}-with-engine
+                PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT_ENGINE}")
+        endif()
+    endforeach()
+endif()
+
 add_unit_test(NAME test_curves)
 add_unit_test(NAME test_subgroup)
 add_unit_test(NAME test_gost89)
